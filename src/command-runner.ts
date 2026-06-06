@@ -1,5 +1,6 @@
 import type { RuntimeConfig } from "./config";
 import { writeJsonArtifact } from "./artifacts";
+import { uploadArtifacts } from "./artifact-uploader";
 import { collectReadiness, readinessPassed } from "./readiness";
 import type { AgentArtifactDraft, AgentToServerMessage, ServerToAgentMessage } from "./protocol";
 import { runWindowsAttendanceCalibration } from "./windows/calibration";
@@ -40,8 +41,9 @@ async function runStart(
     if (config.mode === "windows" && scenarioId === "td3q.attendance") {
         try {
             const result = await runWindowsAttendanceCalibration(config, runId);
+            const artifacts = await uploadArtifacts(config, runId, result.artifacts);
 
-            for (const artifact of result.artifacts) {
+            for (const artifact of artifacts) {
                 send({
                     type: "run_event",
                     runId,
@@ -64,7 +66,7 @@ async function runStart(
                     ok: false,
                     runId,
                     message: `anchor not found: attendanceIcon score=${result.requiredAnchorScore}`,
-                    artifacts: result.artifacts,
+                    artifacts,
                 };
             }
 
@@ -80,7 +82,7 @@ async function runStart(
                 ok: true,
                 runId,
                 message: "Windows attendance calibration completed",
-                artifacts: result.artifacts,
+                artifacts,
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

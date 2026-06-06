@@ -52,5 +52,7 @@ export type CalibrationResult = {
         screenshotPath: string;
         overlayPath: string;
         jsonPath: string;
+        attendanceIconRoiPath?: string;
+        attendanceIconMatchPath?: string;
     };
 };

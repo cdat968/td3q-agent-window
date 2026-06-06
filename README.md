@@ -86,6 +86,7 @@ AGENT_SHARED_TOKEN=dev-token npm run agents:orchestrator
 AGENT_ID=agt-002
 AGENT_TOKEN=dev-token
 AGENT_WS_URL=ws://<backend-ip>:3010/agents/ws
+AGENT_BACKEND_HTTP_URL=http://<backend-ip>:3000
 AGENT_MODE=windows
 AGENT_ARTIFACT_DIR=C:\td3q-agent\artifacts
 AGENT_TEMPLATE_DIR=C:\td3q-agent\templates
@@ -118,6 +119,16 @@ C:\td3q-agent\artifacts\<run-id>\calibration.json
 The overlay shows the game canvas, resolved ROI boxes, and attendance icon
 match box. If the icon is not found, the command fails but still returns the
 debug artifacts so the ROI can be inspected.
+
+If `AGENT_BACKEND_HTTP_URL` is configured and the backend has Cloudinary
+credentials, the runtime uploads calibration artifacts through:
+
+```text
+POST <AGENT_BACKEND_HTTP_URL>/api/agent-artifacts/upload
+```
+
+Cloudinary credentials must stay on the backend `.env`, not in the Windows
+runtime `.env`.
 
 ## Next Runtime Work
 

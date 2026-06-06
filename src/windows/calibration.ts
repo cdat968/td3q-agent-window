@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import path from "node:path";
 import type { RuntimeConfig } from "../config";
 import type { AgentArtifactDraft } from "../protocol";
+import { writePngCrop } from "./image-crop";
 import { renderOverlay } from "./overlay-renderer";
 import { resolveAttendanceRois } from "./roi-resolver";
 import { capturePrimaryScreenPng } from "./screen-capture";
@@ -87,6 +88,8 @@ export async function runWindowsAttendanceCalibration(
     const screenshotPath = artifactPath(config, runId, "calibration-screenshot.png");
     const overlayPath = artifactPath(config, runId, "calibration-overlay.png");
     const jsonPath = artifactPath(config, runId, "calibration.json");
+    const attendanceIconRoiPath = artifactPath(config, runId, "attendance-icon-roi.png");
+    const attendanceIconMatchPath = artifactPath(config, runId, "attendance-icon-match.png");
 
     await capturePrimaryScreenPng(screenshotPath);
 
@@ -100,6 +103,10 @@ export async function runWindowsAttendanceCalibration(
         threshold: REQUIRED_ANCHOR.threshold,
         step: 3,
     });
+    const attendanceIconMatchBox = match.box ?? attendanceIconRoi;
+
+    await writePngCrop(screenshot, attendanceIconRoi, attendanceIconRoiPath);
+    await writePngCrop(screenshot, attendanceIconMatchBox, attendanceIconMatchPath);
 
     const anchors: TemplateAnchor[] = [
         {
@@ -135,6 +142,8 @@ export async function runWindowsAttendanceCalibration(
             screenshotPath,
             overlayPath,
             jsonPath,
+            attendanceIconRoiPath,
+            attendanceIconMatchPath,
         },
     };
 
@@ -162,6 +171,28 @@ export async function runWindowsAttendanceCalibration(
                     source: "windows-calibration",
                     role: "calibration-json",
                     calibration: metadataForCalibration(calibration),
+                },
+            },
+            {
+                kind: "screenshot",
+                localPath: attendanceIconRoiPath,
+                metadata: {
+                    source: "windows-calibration",
+                    role: "attendance-icon-roi",
+                    matched: match.matched,
+                    anchorScore: match.score,
+                    roi: attendanceIconRoi,
+                },
+            },
+            {
+                kind: "screenshot",
+                localPath: attendanceIconMatchPath,
+                metadata: {
+                    source: "windows-calibration",
+                    role: "attendance-icon-match",
+                    matched: match.matched,
+                    anchorScore: match.score,
+                    box: attendanceIconMatchBox,
                 },
             },
         ],

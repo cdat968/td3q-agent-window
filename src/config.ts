@@ -8,6 +8,7 @@ export type RuntimeConfig = {
     agentId: string;
     token: string;
     wsUrl: string;
+    backendHttpUrl?: string;
     mode: AgentMode;
     version: string;
     hostname: string;
@@ -50,6 +51,7 @@ export function loadConfig(): RuntimeConfig {
         agentId,
         token: requiredEnv("AGENT_TOKEN"),
         wsUrl: requiredEnv("AGENT_WS_URL"),
+        backendHttpUrl: process.env.AGENT_BACKEND_HTTP_URL || undefined,
         mode,
         version: process.env.AGENT_VERSION ?? "0.1.0",
         hostname: process.env.AGENT_HOSTNAME ?? os.hostname(),
