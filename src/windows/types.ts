@@ -46,9 +46,10 @@ export type CalibrationStatus =
     | "not_found";
 
 export type CalibrationScanBand = {
-    id: "top-menu-primary" | "top-menu-fallback";
+    id: string;
     box: PixelBox;
     used: boolean;
+    step?: number;
 };
 
 export type CalibrationCandidate = {

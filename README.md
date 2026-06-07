@@ -115,21 +115,31 @@ C:\td3q-agent\artifacts\<run-id>\calibration-screenshot.png
 C:\td3q-agent\artifacts\<run-id>\calibration-overlay.png
 C:\td3q-agent\artifacts\<run-id>\calibration.json
 C:\td3q-agent\artifacts\<run-id>\top-menu-band.png
-C:\td3q-agent\artifacts\<run-id>\top-menu-fallback-band.png
+C:\td3q-agent\artifacts\<run-id>\right-ui-band.png
+C:\td3q-agent\artifacts\<run-id>\full-game-band.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-sheet.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-01.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-02.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-03.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-04.png
 C:\td3q-agent\artifacts\<run-id>\attendance-candidate-05.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-06.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-07.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-08.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-09.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-10.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-11.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-12.png
 C:\td3q-agent\artifacts\<run-id>\attendance-icon-roi.png
 C:\td3q-agent\artifacts\<run-id>\attendance-icon-match.png
 ```
 
 The overlay shows the game canvas, scan bands, candidate boxes, and the selected
-attendance match box. If only the legacy `attendance_icon.png` template exists,
-the command returns `needs_template_confirmation` instead of a trusted match.
-Add `attendance_icon.windows.png` in `AGENT_TEMPLATE_DIR` after confirming the
+attendance match box. The runtime scans full top menu, right-side UI strip, and
+full-game coarse bands so right-edge UI is not skipped. If only the legacy
+`attendance_icon.png` template exists, the command returns
+`needs_template_confirmation` instead of a trusted match. Add
+`attendance_icon.windows.png` in `AGENT_TEMPLATE_DIR` after confirming the
 correct candidate crop from Windows artifacts.
 
 If `AGENT_BACKEND_HTTP_URL` is configured and the backend has Cloudinary

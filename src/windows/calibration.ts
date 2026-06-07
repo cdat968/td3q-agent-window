@@ -25,24 +25,54 @@ const REQUIRED_ANCHOR = {
     legacyTemplateFile: "attendance_icon.png",
     windowsTemplateFile: "attendance_icon.windows.png",
     candidateMinScore: 0.45,
-    reviewThreshold: 0.6,
     acceptanceThreshold: 0.72,
-    candidateLimit: 5,
+    candidateLimitPerBand: 4,
 };
 
-const TOP_MENU_PRIMARY_BAND = {
-    xRatio: 0.2,
-    yRatio: 0.04,
-    widthRatio: 0.76,
-    heightRatio: 0.3,
+const TOP_MENU_FULL_BAND = {
+    xRatio: 0,
+    yRatio: 0.02,
+    widthRatio: 1,
+    heightRatio: 0.42,
 } satisfies RatioRoi;
 
-const TOP_MENU_FALLBACK_BAND = {
-    xRatio: 0,
-    yRatio: 0.04,
-    widthRatio: 1,
-    heightRatio: 0.32,
+const RIGHT_UI_STRIP_BAND = {
+    xRatio: 0.5,
+    yRatio: 0,
+    widthRatio: 0.5,
+    heightRatio: 1,
 } satisfies RatioRoi;
+
+const FULL_GAME_COARSE_BAND = {
+    xRatio: 0,
+    yRatio: 0,
+    widthRatio: 1,
+    heightRatio: 1,
+} satisfies RatioRoi;
+
+const SCAN_BAND_DEFINITIONS = [
+    {
+        id: "top-menu-full",
+        ratio: TOP_MENU_FULL_BAND,
+        step: 3,
+        artifactRole: "top-menu-band",
+        fileName: "top-menu-band.png",
+    },
+    {
+        id: "right-ui-strip",
+        ratio: RIGHT_UI_STRIP_BAND,
+        step: 3,
+        artifactRole: "right-ui-band",
+        fileName: "right-ui-band.png",
+    },
+    {
+        id: "full-game-coarse",
+        ratio: FULL_GAME_COARSE_BAND,
+        step: 9,
+        artifactRole: "full-game-band",
+        fileName: "full-game-band.png",
+    },
+] as const;
 
 function artifactPath(config: RuntimeConfig, runId: string, fileName: string) {
     return path.join(config.artifactDir, runId, fileName);
@@ -146,11 +176,13 @@ function buildScanBand(
     baseRect: PixelBox,
     ratio: RatioRoi,
     used: boolean,
+    step: number,
 ): CalibrationScanBand {
     return {
         id,
         box: resolveRatioRoi(baseRect, ratio),
         used,
+        step,
     };
 }
 
@@ -173,6 +205,13 @@ function getCalibrationStatus(
 
 function candidateFileName(rank: number) {
     return `attendance-candidate-${String(rank).padStart(2, "0")}.png`;
+}
+
+function chooseBestCandidate(candidates: CalibrationCandidate[]) {
+    return candidates.reduce<CalibrationCandidate | undefined>((best, candidate) => {
+        if (!best || candidate.score > best.score) return candidate;
+        return best;
+    }, undefined);
 }
 
 export async function runWindowsAttendanceCalibration(
@@ -198,8 +237,10 @@ export async function runWindowsAttendanceCalibration(
     const jsonPath = artifactPath(config, runId, "calibration.json");
     const attendanceIconRoiPath = artifactPath(config, runId, "attendance-icon-roi.png");
     const attendanceIconMatchPath = artifactPath(config, runId, "attendance-icon-match.png");
-    const topMenuBandPath = artifactPath(config, runId, "top-menu-band.png");
-    const topMenuFallbackBandPath = artifactPath(config, runId, "top-menu-fallback-band.png");
+    const scanBandArtifacts = SCAN_BAND_DEFINITIONS.map((definition) => ({
+        ...definition,
+        path: artifactPath(config, runId, definition.fileName),
+    }));
     const candidateSheetPath = artifactPath(config, runId, "attendance-candidate-sheet.png");
 
     await capturePrimaryScreenPng(screenshotPath);
@@ -207,56 +248,36 @@ export async function runWindowsAttendanceCalibration(
     const screenshot = await readPng(screenshotPath);
     const template = await readPng(templateConfig.path);
     const resolvedRois = resolveAttendanceRois(stabilized.gameCanvasRect);
-    const primaryBand = buildScanBand(
-        "top-menu-primary",
-        stabilized.gameCanvasRect,
-        TOP_MENU_PRIMARY_BAND,
-        true,
+    const scanBands = scanBandArtifacts.map((definition) =>
+        buildScanBand(
+            definition.id,
+            stabilized.gameCanvasRect,
+            definition.ratio,
+            true,
+            definition.step,
+        ),
     );
-    const fallbackBand = buildScanBand(
-        "top-menu-fallback",
-        stabilized.gameCanvasRect,
-        TOP_MENU_FALLBACK_BAND,
-        false,
-    );
-
-    const primaryCandidates = matchTemplateCandidates(screenshot, template, {
-        roi: primaryBand.box,
-        limit: REQUIRED_ANCHOR.candidateLimit,
-        minScore: REQUIRED_ANCHOR.candidateMinScore,
-        step: 3,
-    });
-    const primaryBestScore = primaryCandidates[0]?.score ?? 0;
-    const shouldUseFallback = primaryBestScore < REQUIRED_ANCHOR.reviewThreshold;
-    const fallbackCandidates = shouldUseFallback
-        ? matchTemplateCandidates(screenshot, template, {
-              roi: fallbackBand.box,
-              limit: REQUIRED_ANCHOR.candidateLimit,
-              minScore: REQUIRED_ANCHOR.candidateMinScore,
-              step: 3,
-          })
-        : [];
-    const activeBand =
-        fallbackCandidates[0] &&
-        fallbackCandidates[0].score > primaryBestScore
-            ? { ...fallbackBand, used: true }
-            : primaryBand;
-    const scanBands = [
-        activeBand.id === primaryBand.id ? primaryBand : { ...primaryBand, used: false },
-        activeBand.id === fallbackBand.id ? activeBand : fallbackBand,
-    ];
-    const sourceCandidates =
-        activeBand.id === fallbackBand.id ? fallbackCandidates : primaryCandidates;
-    const candidates: CalibrationCandidate[] = sourceCandidates
-        .map((candidate, index) => ({
-            rank: index + 1,
+    const candidates: CalibrationCandidate[] = scanBands.flatMap((scanBand) =>
+        matchTemplateCandidates(screenshot, template, {
+            roi: scanBand.box,
+            limit: REQUIRED_ANCHOR.candidateLimitPerBand,
+            minScore: REQUIRED_ANCHOR.candidateMinScore,
+            step: scanBand.step,
+        }).map((candidate) => ({
+            rank: 0,
             score: candidate.score,
             box: candidate.box,
             templateFile: templateConfig.fileName,
-            scanBand: activeBand.id,
+            scanBand: scanBand.id,
             accepted: false,
-        }));
-    const selectedCandidate = candidates[0];
+        })),
+    );
+
+    candidates.forEach((candidate, index) => {
+        candidate.rank = index + 1;
+    });
+
+    const selectedCandidate = chooseBestCandidate(candidates);
     const accepted =
         Boolean(selectedCandidate) &&
         templateConfig.isWindowsTemplate &&
@@ -271,16 +292,23 @@ export async function runWindowsAttendanceCalibration(
         selectedCandidate,
         templateConfig.isWindowsTemplate,
     );
-    const attendanceIconRoi = activeBand.box;
-    const attendanceIconMatchBox = selectedCandidate?.box ?? activeBand.box;
+    const attendanceIconRoi =
+        scanBands.find((scanBand) => scanBand.id === selectedCandidate?.scanBand)
+            ?.box ?? scanBands[0].box;
+    const attendanceIconMatchBox = selectedCandidate?.box ?? attendanceIconRoi;
     const candidatePaths = candidates.map((candidate) =>
         artifactPath(config, runId, candidateFileName(candidate.rank)),
     );
 
     await writePngCrop(screenshot, attendanceIconRoi, attendanceIconRoiPath);
     await writePngCrop(screenshot, attendanceIconMatchBox, attendanceIconMatchPath);
-    await writePngCrop(screenshot, primaryBand.box, topMenuBandPath);
-    await writePngCrop(screenshot, fallbackBand.box, topMenuFallbackBandPath);
+
+    for (const scanBandArtifact of scanBandArtifacts) {
+        const scanBand = scanBands.find((item) => item.id === scanBandArtifact.id);
+        if (scanBand) {
+            await writePngCrop(screenshot, scanBand.box, scanBandArtifact.path);
+        }
+    }
 
     for (const candidate of candidates) {
         await writePngCrop(
@@ -332,8 +360,12 @@ export async function runWindowsAttendanceCalibration(
             screenshotPath,
             overlayPath,
             jsonPath,
-            topMenuBandPath,
-            topMenuFallbackBandPath,
+            topMenuBandPath: scanBandArtifacts.find(
+                (artifact) => artifact.artifactRole === "top-menu-band",
+            )?.path,
+            topMenuFallbackBandPath: scanBandArtifacts.find(
+                (artifact) => artifact.artifactRole === "full-game-band",
+            )?.path,
             candidateSheetPath: candidates.length > 0 ? candidateSheetPath : undefined,
             candidatePaths,
             attendanceIconRoiPath,
@@ -367,24 +399,25 @@ export async function runWindowsAttendanceCalibration(
                     calibration: metadataForCalibration(calibration),
                 },
             },
-            {
-                kind: "screenshot",
-                localPath: topMenuBandPath,
-                metadata: {
-                    source: "windows-calibration",
-                    role: "top-menu-band",
-                    scanBand: primaryBand,
-                },
-            },
-            {
-                kind: "screenshot",
-                localPath: topMenuFallbackBandPath,
-                metadata: {
-                    source: "windows-calibration",
-                    role: "top-menu-fallback-band",
-                    scanBand: fallbackBand,
-                },
-            },
+            ...scanBandArtifacts.flatMap((scanBandArtifact) => {
+                const scanBand = scanBands.find(
+                    (item) => item.id === scanBandArtifact.id,
+                );
+
+                return scanBand
+                    ? [
+                          {
+                              kind: "screenshot" as const,
+                              localPath: scanBandArtifact.path,
+                              metadata: {
+                                  source: "windows-calibration",
+                                  role: scanBandArtifact.artifactRole,
+                                  scanBand,
+                              },
+                          },
+                      ]
+                    : [];
+            }),
             ...(candidates.length > 0
                 ? [
                       {
