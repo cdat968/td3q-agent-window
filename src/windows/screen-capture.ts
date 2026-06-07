@@ -6,8 +6,33 @@ import type { PixelBox } from "./types";
 
 const execFileAsync = promisify(execFile);
 
+export type CaptureBounds = PixelBox;
+
+export type CaptureDpiResult = {
+    dpiAwarenessAttempted: boolean;
+    dpiAwarenessOk: boolean;
+    dpiAwarenessError?: string;
+};
+
 function psString(value: string) {
     return `'${value.replace(/'/g, "''")}'`;
+}
+
+function psBox(box: CaptureBounds) {
+    return `@{ x = ${box.x}; y = ${box.y}; width = ${box.width}; height = ${box.height} }`;
+}
+
+function parseCaptureResult(stdout: string): CaptureDpiResult {
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+        return {
+            dpiAwarenessAttempted: true,
+            dpiAwarenessOk: false,
+            dpiAwarenessError: "capture returned empty metadata",
+        };
+    }
+
+    return JSON.parse(trimmed) as CaptureDpiResult;
 }
 
 export async function capturePrimaryScreenPng(outputPath: string): Promise<string> {
@@ -35,6 +60,97 @@ $bitmap.Dispose()
     ]);
 
     return outputPath;
+}
+
+export async function captureScreenBoundsPng(
+    outputPath: string,
+    bounds: CaptureBounds,
+): Promise<CaptureDpiResult> {
+    await mkdir(path.dirname(outputPath), { recursive: true });
+
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$dpiAttempted = $true
+$dpiOk = $false
+$dpiError = $null
+try {
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class DpiAwarenessApi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int awareness);
+}
+"@
+  try {
+    $dpiResult = [DpiAwarenessApi]::SetProcessDpiAwareness(2)
+    $dpiOk = ($dpiResult -eq 0 -or $dpiResult -eq -2147024891)
+  } catch {
+    $dpiOk = [DpiAwarenessApi]::SetProcessDPIAware()
+  }
+} catch {
+  $dpiError = $_.Exception.Message
+}
+$bounds = ${psBox(bounds)}
+$bitmap = New-Object System.Drawing.Bitmap ([int]$bounds.width), ([int]$bounds.height)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.CopyFromScreen([int]$bounds.x, [int]$bounds.y, 0, 0, $bitmap.Size)
+$bitmap.Save(${psString(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose()
+$bitmap.Dispose()
+@{
+  dpiAwarenessAttempted = $dpiAttempted
+  dpiAwarenessOk = $dpiOk
+  dpiAwarenessError = $dpiError
+} | ConvertTo-Json -Compress
+`;
+
+    const { stdout } = await execFileAsync("powershell.exe", [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
+
+    return parseCaptureResult(stdout);
+}
+
+export async function getPrimaryAndVirtualScreenBounds(): Promise<{
+    primary: PixelBox;
+    virtual: PixelBox;
+}> {
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+function ToBox($bounds) {
+  return @{
+    x = [int]$bounds.X
+    y = [int]$bounds.Y
+    width = [int]$bounds.Width
+    height = [int]$bounds.Height
+  }
+}
+@{
+  primary = ToBox ([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)
+  virtual = ToBox ([System.Windows.Forms.SystemInformation]::VirtualScreen)
+} | ConvertTo-Json -Compress -Depth 4
+`;
+
+    const { stdout } = await execFileAsync("powershell.exe", [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
+
+    return JSON.parse(stdout.trim()) as {
+        primary: PixelBox;
+        virtual: PixelBox;
+    };
 }
 
 export function fullScreenBox(width: number, height: number): PixelBox {

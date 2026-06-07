@@ -3,7 +3,7 @@ import { writeJsonArtifact } from "./artifacts";
 import { uploadArtifacts } from "./artifact-uploader";
 import { collectReadiness, readinessPassed } from "./readiness";
 import type { AgentArtifactDraft, AgentToServerMessage, ServerToAgentMessage } from "./protocol";
-import { runWindowsAttendanceCalibration } from "./windows/calibration";
+import { runWindowsCaptureDiagnostic } from "./windows/capture-diagnostic";
 
 export type SendAgentMessage = (message: AgentToServerMessage) => void;
 
@@ -17,6 +17,26 @@ type CommandResult = {
 function payloadString(payload: Record<string, unknown> | undefined, key: string) {
     const value = payload?.[key];
     return typeof value === "string" ? value : undefined;
+}
+
+function sendProgress(
+    send: SendAgentMessage,
+    runId: string,
+    percent: number,
+    message: string,
+    metadata?: Record<string, unknown>,
+) {
+    send({
+        type: "run_event",
+        runId,
+        eventType: "run_progress",
+        message: `${percent}% ${message}`,
+        metadata: {
+            percent,
+            phase: "capture-diagnostic",
+            ...(metadata ?? {}),
+        },
+    });
 }
 
 async function runStart(
@@ -40,8 +60,15 @@ async function runStart(
 
     if (config.mode === "windows" && scenarioId === "td3q.attendance") {
         try {
-            const result = await runWindowsAttendanceCalibration(config, runId);
+            const result = await runWindowsCaptureDiagnostic(config, runId, send);
+            sendProgress(send, runId, 85, "artifact upload started", {
+                artifactCount: result.artifacts.length,
+            });
             const artifacts = await uploadArtifacts(config, runId, result.artifacts);
+            sendProgress(send, runId, 95, "artifact upload completed", {
+                artifactCount: artifacts.length,
+                uploadedCount: artifacts.filter((artifact) => artifact.url).length,
+            });
 
             for (const artifact of artifacts) {
                 send({
@@ -53,35 +80,24 @@ async function runStart(
                 });
             }
 
-            if (!result.requiredAnchorMatched) {
-                send({
-                    type: "run_event",
-                    runId,
-                    eventType: "calibration_failed",
-                    message: `anchor not found: attendanceIcon score=${result.requiredAnchorScore}`,
-                    metadata: result.calibration,
-                });
-
-                return {
-                    ok: false,
-                    runId,
-                    message: `anchor not found: attendanceIcon score=${result.requiredAnchorScore}`,
-                    artifacts,
-                };
-            }
-
+            sendProgress(send, runId, 100, "capture diagnostic finished", {
+                captureSource: result.captureSource,
+            });
             send({
                 type: "run_event",
                 runId,
-                eventType: "calibration_finished",
-                message: "Windows attendance calibration completed",
-                metadata: result.calibration,
+                eventType: "capture_diagnostic_finished",
+                message: "Windows capture diagnostic completed",
+                metadata: {
+                    captureSource: result.captureSource,
+                    captureCandidates: result.captureCandidates,
+                },
             });
 
             return {
                 ok: true,
                 runId,
-                message: "Windows attendance calibration completed",
+                message: "Windows capture diagnostic completed",
                 artifacts,
             };
         } catch (error) {
@@ -89,11 +105,12 @@ async function runStart(
             send({
                 type: "run_event",
                 runId,
-                eventType: "calibration_failed",
+                eventType: "capture_diagnostic_failed",
                 message,
                 metadata: {
                     scenarioId,
                     mode: config.mode,
+                    phase: "capture-diagnostic",
                 },
             });
 

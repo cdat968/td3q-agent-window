@@ -1,6 +1,6 @@
 # Windows Agent Runtime
 
-Status: Phase 7 calibration MVP.
+Status: Phase 7.4 capture diagnostic MVP.
 
 This is the desktop runtime process for one Windows game machine. It connects to
 the Agent Orchestrator over WebSocket, reports readiness, receives commands,
@@ -8,9 +8,11 @@ writes local artifacts, and reports command/run results back to the backend DB
 through the orchestrator.
 
 It does not yet click inside TD3Q. In Windows mode, `run.start` for
-`td3q.attendance` runs a calibration proof: focus/maximize the publisher game
-window, capture a full-screen screenshot, choose a screen-first game canvas,
-scan attendance candidates, and write debug artifacts.
+`td3q.attendance` currently runs capture diagnostic mode: focus/maximize the
+publisher game window, capture several Windows screen sources, select the best
+source, upload review artifacts, and report progress. Attendance
+candidate/template matching is intentionally disabled in Phase 7.4 until the
+capture source is proven correct.
 
 ## Modes
 
@@ -108,44 +110,29 @@ npm run start
 ```
 
 8. From the dashboard/API, queue `agent.doctor` or `run.start` with
-   `scenarioId: "td3q.attendance"`. In Windows mode, `run.start` writes:
+   `scenarioId: "td3q.attendance"`. In Windows mode, Phase 7.4 `run.start`
+   writes up to six images and one JSON file:
 
 ```text
-C:\td3q-agent\artifacts\<run-id>\calibration-screenshot.png
-C:\td3q-agent\artifacts\<run-id>\calibration-overlay.png
+C:\td3q-agent\artifacts\<run-id>\capture-primary-logical.png
+C:\td3q-agent\artifacts\<run-id>\capture-virtual-screen.png
+C:\td3q-agent\artifacts\<run-id>\capture-window-rect.png
+C:\td3q-agent\artifacts\<run-id>\capture-client-rect.png
+C:\td3q-agent\artifacts\<run-id>\capture-selected.png
+C:\td3q-agent\artifacts\<run-id>\capture-selection-overlay.png
 C:\td3q-agent\artifacts\<run-id>\calibration.json
-C:\td3q-agent\artifacts\<run-id>\canvas-selection-overlay.png
-C:\td3q-agent\artifacts\<run-id>\canvas-screen.png
-C:\td3q-agent\artifacts\<run-id>\canvas-client.png
-C:\td3q-agent\artifacts\<run-id>\canvas-window.png
-C:\td3q-agent\artifacts\<run-id>\top-menu-band.png
-C:\td3q-agent\artifacts\<run-id>\right-ui-band.png
-C:\td3q-agent\artifacts\<run-id>\full-game-band.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-sheet.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-01.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-02.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-03.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-04.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-05.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-06.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-07.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-08.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-09.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-10.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-11.png
-C:\td3q-agent\artifacts\<run-id>\attendance-candidate-12.png
-C:\td3q-agent\artifacts\<run-id>\attendance-icon-roi.png
-C:\td3q-agent\artifacts\<run-id>\attendance-icon-match.png
 ```
 
-The canvas artifacts compare the full screenshot, Windows client rect, and
-window rect. Phase 7.3 selects the full screen as `gameCanvasRect` by default so
-visible right-edge UI is not skipped when Windows `clientRect` is wrong. The
-runtime scans full top menu, right-side UI strip, and full-game coarse bands. If
-only the legacy `attendance_icon.png` template exists, the command returns
-`needs_template_confirmation` instead of a trusted match. Add
-`attendance_icon.windows.png` in `AGENT_TEMPLATE_DIR` after confirming the
-correct candidate crop from Windows artifacts.
+The capture artifacts compare the current primary screen capture, virtual screen
+capture, game window rect capture, and game client rect capture. The selected
+source is copied to `capture-selected.png`. `capture-selection-overlay.png`
+marks all usable bounds and highlights the selected source. Phase 7.4 does not
+create `attendance-candidate-*`, `attendance-icon-roi`, or
+`attendance-icon-match` artifacts.
+
+During a run, the agent sends progress events at 10, 20, 30, 40, 55, 70, 85,
+95, and 100 percent. The orchestrator logs these progress messages and persists
+them in `automation_run_events`.
 
 If `AGENT_BACKEND_HTTP_URL` is configured and the backend has Cloudinary
 credentials, the runtime uploads calibration artifacts through:
