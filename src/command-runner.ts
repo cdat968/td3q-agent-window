@@ -82,6 +82,8 @@ async function runStart(
 
             sendProgress(send, runId, 100, "capture diagnostic finished", {
                 captureSource: result.captureSource,
+                gameContentRect: result.gameContent.gameContentRect,
+                gameContentResolver: result.gameContent.gameContentResolver,
             });
             send({
                 type: "run_event",
@@ -91,6 +93,9 @@ async function runStart(
                 metadata: {
                     captureSource: result.captureSource,
                     captureCandidates: result.captureCandidates,
+                    gameContentRect: result.gameContent.gameContentRect,
+                    gameContentResolver: result.gameContent.gameContentResolver,
+                    excludedRects: result.gameContent.excludedRects,
                 },
             });
 

@@ -1,6 +1,6 @@
 # Windows Agent Runtime
 
-Status: Phase 7.4 capture diagnostic MVP.
+Status: Phase 7.5 capture diagnostic and game content rect MVP.
 
 This is the desktop runtime process for one Windows game machine. It connects to
 the Agent Orchestrator over WebSocket, reports readiness, receives commands,
@@ -10,9 +10,9 @@ through the orchestrator.
 It does not yet click inside TD3Q. In Windows mode, `run.start` for
 `td3q.attendance` currently runs capture diagnostic mode: focus/maximize the
 publisher game window, capture several Windows screen sources, select the best
-source, upload review artifacts, and report progress. Attendance
-candidate/template matching is intentionally disabled in Phase 7.4 until the
-capture source is proven correct.
+source, resolve the real game content rect, upload review artifacts, and report
+progress. Attendance candidate/template matching is intentionally disabled until
+the capture source and game content rect are proven correct.
 
 ## Modes
 
@@ -110,8 +110,8 @@ npm run start
 ```
 
 8. From the dashboard/API, queue `agent.doctor` or `run.start` with
-   `scenarioId: "td3q.attendance"`. In Windows mode, Phase 7.4 `run.start`
-   writes up to six images and one JSON file:
+   `scenarioId: "td3q.attendance"`. In Windows mode, Phase 7.5 `run.start`
+   writes up to nine images and one JSON file:
 
 ```text
 C:\td3q-agent\artifacts\<run-id>\capture-primary-logical.png
@@ -120,6 +120,9 @@ C:\td3q-agent\artifacts\<run-id>\capture-window-rect.png
 C:\td3q-agent\artifacts\<run-id>\capture-client-rect.png
 C:\td3q-agent\artifacts\<run-id>\capture-selected.png
 C:\td3q-agent\artifacts\<run-id>\capture-selection-overlay.png
+C:\td3q-agent\artifacts\<run-id>\game-content-crop.png
+C:\td3q-agent\artifacts\<run-id>\game-content-overlay.png
+C:\td3q-agent\artifacts\<run-id>\game-content-gutter-debug.png
 C:\td3q-agent\artifacts\<run-id>\calibration.json
 ```
 
@@ -129,6 +132,13 @@ source is copied to `capture-selected.png`. `capture-selection-overlay.png`
 marks all usable bounds and highlights the selected source. Phase 7.4 does not
 create `attendance-candidate-*`, `attendance-icon-roi`, or
 `attendance-icon-match` artifacts.
+
+Phase 7.5 resolves `gameContentRect` from `capture-selected.png`. It uses the
+DPI-aware `clientRect` as the base crop, then detects and excludes a low-detail
+right gutter. `game-content-overlay.png` marks the base rect, excluded gutter,
+and selected game content rect. `calibration.json` includes `gameContentRect`,
+`baseRect`, `excludedRects`, and `rightGutter` metadata for the next attendance
+matching phase.
 
 During a run, the agent sends progress events at 10, 20, 30, 40, 55, 70, 85,
 95, and 100 percent. The orchestrator logs these progress messages and persists

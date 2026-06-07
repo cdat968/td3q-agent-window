@@ -2,6 +2,7 @@ import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RuntimeConfig } from "../config";
 import type { AgentArtifactDraft, AgentToServerMessage } from "../protocol";
+import { resolveWindowsGameContent, type GameContentResolution } from "./game-content-resolver";
 import { renderOverlay } from "./overlay-renderer";
 import {
     captureScreenBoundsPng,
@@ -35,6 +36,7 @@ type CaptureDiagnosticResult = {
     captureSource: CaptureSource;
     selectedCapture: CaptureCandidate;
     captureCandidates: CaptureCandidate[];
+    gameContent: GameContentResolution;
     stabilized: WindowStabilization;
     artifacts: AgentArtifactDraft[];
 };
@@ -124,6 +126,7 @@ function captureArtifact(candidate: CaptureCandidate): AgentArtifactDraft | unde
             selected: candidate.selected,
             dpiAwarenessAttempted: candidate.dpi?.dpiAwarenessAttempted,
             dpiAwarenessOk: candidate.dpi?.dpiAwarenessOk,
+            dpiAwarenessMethod: candidate.dpi?.dpiAwarenessMethod,
             dpiAwarenessError: candidate.dpi?.dpiAwarenessError,
         },
     };
@@ -231,6 +234,22 @@ export async function runWindowsCaptureDiagnostic(
     const selectedCapture =
         captureCandidates.find((candidate) => candidate.source === selected.source) ??
         selected;
+    const gameContent = await resolveWindowsGameContent(
+        {
+            source: selected.source,
+            path: selectedPath,
+            bounds: selected.bounds,
+        },
+        {
+            clientRect: stabilized.clientRect,
+            windowRect: stabilized.windowRect,
+        },
+        {
+            cropPath: artifactPath(config, runId, "game-content-crop.png"),
+            overlayPath: artifactPath(config, runId, "game-content-overlay.png"),
+            gutterDebugPath: artifactPath(config, runId, "game-content-gutter-debug.png"),
+        },
+    );
     const overlayBase =
         captureCandidates.find((candidate) => candidate.source === "virtual-screen" && candidate.ok) ??
         captureCandidates.find((candidate) => candidate.source === "primary-logical" && candidate.ok) ??
@@ -256,6 +275,11 @@ export async function runWindowsCaptureDiagnostic(
         captureSource: selected.source,
         selectedCapture,
         captureCandidates,
+        gameContentRect: gameContent.gameContentRect,
+        gameContentResolver: gameContent.gameContentResolver,
+        baseRect: gameContent.baseRect,
+        excludedRects: gameContent.excludedRects,
+        rightGutter: gameContent.rightGutter,
         screen: stabilized.screen,
         windowRect: stabilized.windowRect,
         clientRect: stabilized.clientRect,
@@ -276,6 +300,7 @@ export async function runWindowsCaptureDiagnostic(
                 captureSource: selected.source,
                 bounds: selected.bounds,
                 selected: true,
+                gameContentRect: gameContent.gameContentRect,
             },
         },
         {
@@ -299,6 +324,7 @@ export async function runWindowsCaptureDiagnostic(
                 captureCandidates,
             },
         },
+        ...gameContent.artifacts,
     ];
 
     return {
@@ -306,6 +332,7 @@ export async function runWindowsCaptureDiagnostic(
         captureSource: selected.source,
         selectedCapture,
         captureCandidates,
+        gameContent,
         stabilized,
         artifacts,
     };
