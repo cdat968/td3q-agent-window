@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import path from "node:path";
 import type { RuntimeConfig } from "../config";
 import type { AgentArtifactDraft } from "../protocol";
+import { resolveGameCanvasRect } from "./canvas-resolver";
 import { writeCandidateSheet } from "./candidate-sheet";
 import { writePngCrop } from "./image-crop";
 import { renderOverlay } from "./overlay-renderer";
@@ -27,6 +28,7 @@ const REQUIRED_ANCHOR = {
     candidateMinScore: 0.45,
     acceptanceThreshold: 0.72,
     candidateLimitPerBand: 4,
+    scales: [0.75, 0.85, 0.9, 1, 1.1, 1.2, 1.35],
 };
 
 const TOP_MENU_FULL_BAND = {
@@ -128,6 +130,10 @@ function metadataForCalibration(calibration: CalibrationResult) {
         windowRect: calibration.windowRect,
         clientRect: calibration.clientRect,
         gameCanvasRect: calibration.gameCanvasRect,
+        previousClientRect: calibration.previousClientRect,
+        selectedGameCanvasRect: calibration.selectedGameCanvasRect,
+        canvasSource: calibration.canvasSource,
+        canvasCandidates: calibration.canvasCandidates,
         calibrationStatus: calibration.calibrationStatus,
         scanBands: calibration.scanBands,
         candidates: calibration.candidates,
@@ -235,6 +241,10 @@ export async function runWindowsAttendanceCalibration(
     const screenshotPath = artifactPath(config, runId, "calibration-screenshot.png");
     const overlayPath = artifactPath(config, runId, "calibration-overlay.png");
     const jsonPath = artifactPath(config, runId, "calibration.json");
+    const canvasSelectionOverlayPath = artifactPath(config, runId, "canvas-selection-overlay.png");
+    const canvasScreenPath = artifactPath(config, runId, "canvas-screen.png");
+    const canvasClientPath = artifactPath(config, runId, "canvas-client.png");
+    const canvasWindowPath = artifactPath(config, runId, "canvas-window.png");
     const attendanceIconRoiPath = artifactPath(config, runId, "attendance-icon-roi.png");
     const attendanceIconMatchPath = artifactPath(config, runId, "attendance-icon-match.png");
     const scanBandArtifacts = SCAN_BAND_DEFINITIONS.map((definition) => ({
@@ -247,11 +257,13 @@ export async function runWindowsAttendanceCalibration(
 
     const screenshot = await readPng(screenshotPath);
     const template = await readPng(templateConfig.path);
-    const resolvedRois = resolveAttendanceRois(stabilized.gameCanvasRect);
+    const canvasResolution = resolveGameCanvasRect(stabilized, screenshot);
+    const gameCanvasRect = canvasResolution.gameCanvasRect;
+    const resolvedRois = resolveAttendanceRois(gameCanvasRect);
     const scanBands = scanBandArtifacts.map((definition) =>
         buildScanBand(
             definition.id,
-            stabilized.gameCanvasRect,
+            gameCanvasRect,
             definition.ratio,
             true,
             definition.step,
@@ -263,10 +275,12 @@ export async function runWindowsAttendanceCalibration(
             limit: REQUIRED_ANCHOR.candidateLimitPerBand,
             minScore: REQUIRED_ANCHOR.candidateMinScore,
             step: scanBand.step,
+            scales: REQUIRED_ANCHOR.scales,
         }).map((candidate) => ({
             rank: 0,
             score: candidate.score,
             box: candidate.box,
+            scale: candidate.scale,
             templateFile: templateConfig.fileName,
             scanBand: scanBand.id,
             accepted: false,
@@ -302,6 +316,17 @@ export async function runWindowsAttendanceCalibration(
 
     await writePngCrop(screenshot, attendanceIconRoi, attendanceIconRoiPath);
     await writePngCrop(screenshot, attendanceIconMatchBox, attendanceIconMatchPath);
+    await writePngCrop(screenshot, gameCanvasRect, canvasScreenPath);
+
+    for (const candidate of canvasResolution.canvasCandidates) {
+        if (candidate.source === "client") {
+            await writePngCrop(screenshot, candidate.box, canvasClientPath);
+        }
+
+        if (candidate.source === "window") {
+            await writePngCrop(screenshot, candidate.box, canvasWindowPath);
+        }
+    }
 
     for (const scanBandArtifact of scanBandArtifacts) {
         const scanBand = scanBands.find((item) => item.id === scanBandArtifact.id);
@@ -342,7 +367,11 @@ export async function runWindowsAttendanceCalibration(
         },
         windowRect: stabilized.windowRect,
         clientRect: stabilized.clientRect,
-        gameCanvasRect: stabilized.gameCanvasRect,
+        gameCanvasRect,
+        previousClientRect: stabilized.clientRect,
+        selectedGameCanvasRect: gameCanvasRect,
+        canvasSource: canvasResolution.canvasSource,
+        canvasCandidates: canvasResolution.canvasCandidates,
         calibrationStatus,
         scanBands,
         candidates,
@@ -353,6 +382,18 @@ export async function runWindowsAttendanceCalibration(
 
     const overlayShapes = buildOverlayShapes(calibrationBody);
     await renderOverlay(screenshotPath, overlayPath, overlayShapes);
+    await renderOverlay(
+        screenshotPath,
+        canvasSelectionOverlayPath,
+        canvasResolution.canvasCandidates.map((candidate) => ({
+            box: candidate.box,
+            color: candidate.selected
+                ? "green"
+                : candidate.source === "client"
+                  ? "yellow"
+                  : "red",
+        })),
+    );
 
     const calibration: CalibrationResult = {
         ...calibrationBody,
@@ -360,6 +401,18 @@ export async function runWindowsAttendanceCalibration(
             screenshotPath,
             overlayPath,
             jsonPath,
+            canvasSelectionOverlayPath,
+            canvasScreenPath,
+            canvasClientPath: canvasResolution.canvasCandidates.some(
+                (candidate) => candidate.source === "client",
+            )
+                ? canvasClientPath
+                : undefined,
+            canvasWindowPath: canvasResolution.canvasCandidates.some(
+                (candidate) => candidate.source === "window",
+            )
+                ? canvasWindowPath
+                : undefined,
             topMenuBandPath: scanBandArtifacts.find(
                 (artifact) => artifact.artifactRole === "top-menu-band",
             )?.path,
@@ -375,105 +428,166 @@ export async function runWindowsAttendanceCalibration(
 
     await writeFile(jsonPath, JSON.stringify(calibration, null, 2), "utf8");
 
+    const canvasCandidateArtifacts: AgentArtifactDraft[] = [];
+    for (const candidate of canvasResolution.canvasCandidates) {
+        if (candidate.source === "client") {
+            canvasCandidateArtifacts.push({
+                kind: "screenshot",
+                localPath: canvasClientPath,
+                metadata: {
+                    source: "windows-calibration",
+                    role: "canvas-client",
+                    canvasSource: candidate.source,
+                    canvasCandidate: candidate,
+                },
+            });
+        }
+
+        if (candidate.source === "window") {
+            canvasCandidateArtifacts.push({
+                kind: "screenshot",
+                localPath: canvasWindowPath,
+                metadata: {
+                    source: "windows-calibration",
+                    role: "canvas-window",
+                    canvasSource: candidate.source,
+                    canvasCandidate: candidate,
+                },
+            });
+        }
+    }
+    const scanBandDrafts: AgentArtifactDraft[] = scanBandArtifacts.flatMap(
+        (scanBandArtifact) => {
+            const scanBand = scanBands.find(
+                (item) => item.id === scanBandArtifact.id,
+            );
+
+            return scanBand
+                ? [
+                      {
+                          kind: "screenshot",
+                          localPath: scanBandArtifact.path,
+                          metadata: {
+                              source: "windows-calibration",
+                              role: scanBandArtifact.artifactRole,
+                              scanBand,
+                          },
+                      },
+                  ]
+                : [];
+        },
+    );
+    const candidateSheetDrafts: AgentArtifactDraft[] =
+        candidates.length > 0
+            ? [
+                  {
+                      kind: "screenshot",
+                      localPath: candidateSheetPath,
+                      metadata: {
+                          source: "windows-calibration",
+                          role: "attendance-candidate-sheet",
+                          templateFile: templateConfig.fileName,
+                          calibrationStatus,
+                          candidateCount: candidates.length,
+                      },
+                  },
+              ]
+            : [];
+    const candidateDrafts: AgentArtifactDraft[] = candidates.map((candidate) => ({
+        kind: "screenshot",
+        localPath: artifactPath(config, runId, candidateFileName(candidate.rank)),
+        metadata: {
+            source: "windows-calibration",
+            role: candidateFileName(candidate.rank).replace(".png", ""),
+            rank: candidate.rank,
+            score: candidate.score,
+            scale: candidate.scale,
+            box: candidate.box,
+            scanBand: candidate.scanBand,
+            templateFile: candidate.templateFile,
+            accepted: candidate.accepted,
+            calibrationStatus,
+        },
+    }));
+    const artifacts: AgentArtifactDraft[] = [
+        {
+            kind: "screenshot",
+            localPath: screenshotPath,
+            metadata: { source: "windows-calibration", role: "calibration-screenshot" },
+        },
+        {
+            kind: "overlay",
+            localPath: overlayPath,
+            metadata: { source: "windows-calibration", role: "calibration-overlay" },
+        },
+        {
+            kind: "trace",
+            localPath: jsonPath,
+            metadata: {
+                source: "windows-calibration",
+                role: "calibration-json",
+                calibration: metadataForCalibration(calibration),
+            },
+        },
+        {
+            kind: "overlay",
+            localPath: canvasSelectionOverlayPath,
+            metadata: {
+                source: "windows-calibration",
+                role: "canvas-selection-overlay",
+                canvasSource: canvasResolution.canvasSource,
+                canvasCandidates: canvasResolution.canvasCandidates,
+            },
+        },
+        {
+            kind: "screenshot",
+            localPath: canvasScreenPath,
+            metadata: {
+                source: "windows-calibration",
+                role: "canvas-screen",
+                canvasSource: canvasResolution.canvasSource,
+                canvasCandidates: canvasResolution.canvasCandidates,
+            },
+        },
+        ...canvasCandidateArtifacts,
+        ...scanBandDrafts,
+        ...candidateSheetDrafts,
+        ...candidateDrafts,
+        {
+            kind: "screenshot",
+            localPath: attendanceIconRoiPath,
+            metadata: {
+                source: "windows-calibration",
+                role: "attendance-icon-roi",
+                matched: accepted,
+                anchorScore: selectedCandidate?.score ?? 0,
+                roi: attendanceIconRoi,
+                canvasSource: canvasResolution.canvasSource,
+                templateFile: templateConfig.fileName,
+                calibrationStatus,
+            },
+        },
+        {
+            kind: "screenshot",
+            localPath: attendanceIconMatchPath,
+            metadata: {
+                source: "windows-calibration",
+                role: "attendance-icon-match",
+                matched: accepted,
+                anchorScore: selectedCandidate?.score ?? 0,
+                scale: selectedCandidate?.scale,
+                box: attendanceIconMatchBox,
+                canvasSource: canvasResolution.canvasSource,
+                templateFile: templateConfig.fileName,
+                calibrationStatus,
+            },
+        },
+    ];
+
     return {
         calibration,
         requiredAnchorMatched: accepted,
         requiredAnchorScore: selectedCandidate?.score ?? 0,
-        artifacts: [
-            {
-                kind: "screenshot",
-                localPath: screenshotPath,
-                metadata: { source: "windows-calibration", role: "calibration-screenshot" },
-            },
-            {
-                kind: "overlay",
-                localPath: overlayPath,
-                metadata: { source: "windows-calibration", role: "calibration-overlay" },
-            },
-            {
-                kind: "trace",
-                localPath: jsonPath,
-                metadata: {
-                    source: "windows-calibration",
-                    role: "calibration-json",
-                    calibration: metadataForCalibration(calibration),
-                },
-            },
-            ...scanBandArtifacts.flatMap((scanBandArtifact) => {
-                const scanBand = scanBands.find(
-                    (item) => item.id === scanBandArtifact.id,
-                );
-
-                return scanBand
-                    ? [
-                          {
-                              kind: "screenshot" as const,
-                              localPath: scanBandArtifact.path,
-                              metadata: {
-                                  source: "windows-calibration",
-                                  role: scanBandArtifact.artifactRole,
-                                  scanBand,
-                              },
-                          },
-                      ]
-                    : [];
-            }),
-            ...(candidates.length > 0
-                ? [
-                      {
-                          kind: "screenshot" as const,
-                          localPath: candidateSheetPath,
-                          metadata: {
-                              source: "windows-calibration",
-                              role: "attendance-candidate-sheet",
-                              templateFile: templateConfig.fileName,
-                              calibrationStatus,
-                              candidateCount: candidates.length,
-                          },
-                      },
-                  ]
-                : []),
-            ...candidates.map((candidate) => ({
-                kind: "screenshot" as const,
-                localPath: artifactPath(config, runId, candidateFileName(candidate.rank)),
-                metadata: {
-                    source: "windows-calibration",
-                    role: candidateFileName(candidate.rank).replace(".png", ""),
-                    rank: candidate.rank,
-                    score: candidate.score,
-                    box: candidate.box,
-                    scanBand: candidate.scanBand,
-                    templateFile: candidate.templateFile,
-                    accepted: candidate.accepted,
-                    calibrationStatus,
-                },
-            })),
-            {
-                kind: "screenshot",
-                localPath: attendanceIconRoiPath,
-                metadata: {
-                    source: "windows-calibration",
-                    role: "attendance-icon-roi",
-                    matched: accepted,
-                    anchorScore: selectedCandidate?.score ?? 0,
-                    roi: attendanceIconRoi,
-                    templateFile: templateConfig.fileName,
-                    calibrationStatus,
-                },
-            },
-            {
-                kind: "screenshot",
-                localPath: attendanceIconMatchPath,
-                metadata: {
-                    source: "windows-calibration",
-                    role: "attendance-icon-match",
-                    matched: accepted,
-                    anchorScore: selectedCandidate?.score ?? 0,
-                    box: attendanceIconMatchBox,
-                    templateFile: templateConfig.fileName,
-                    calibrationStatus,
-                },
-            },
-        ],
+        artifacts,
     };
 }

@@ -29,6 +29,15 @@ export type WindowStabilization = {
     gameCanvasRect: PixelBox;
 };
 
+export type CanvasSource = "screen" | "client" | "window";
+
+export type CanvasCandidate = {
+    source: CanvasSource;
+    box: PixelBox;
+    originalBox?: PixelBox;
+    selected: boolean;
+};
+
 export type TemplateAnchor = {
     id: string;
     templateFile: string;
@@ -56,6 +65,7 @@ export type CalibrationCandidate = {
     rank: number;
     score: number;
     box: PixelBox;
+    scale?: number;
     templateFile: string;
     scanBand: CalibrationScanBand["id"];
     accepted: boolean;
@@ -68,6 +78,10 @@ export type CalibrationResult = {
     windowRect?: PixelBox;
     clientRect?: PixelBox;
     gameCanvasRect: PixelBox;
+    previousClientRect?: PixelBox;
+    selectedGameCanvasRect?: PixelBox;
+    canvasSource?: CanvasSource;
+    canvasCandidates?: CanvasCandidate[];
     calibrationStatus?: CalibrationStatus;
     scanBands?: CalibrationScanBand[];
     candidates?: CalibrationCandidate[];
@@ -78,6 +92,10 @@ export type CalibrationResult = {
         screenshotPath: string;
         overlayPath: string;
         jsonPath: string;
+        canvasSelectionOverlayPath?: string;
+        canvasScreenPath?: string;
+        canvasClientPath?: string;
+        canvasWindowPath?: string;
         topMenuBandPath?: string;
         topMenuFallbackBandPath?: string;
         candidateSheetPath?: string;

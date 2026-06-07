@@ -9,8 +9,8 @@ through the orchestrator.
 
 It does not yet click inside TD3Q. In Windows mode, `run.start` for
 `td3q.attendance` runs a calibration proof: focus/maximize the publisher game
-window, capture a screenshot, scan the top menu band for attendance candidates,
-and write debug artifacts.
+window, capture a full-screen screenshot, choose a screen-first game canvas,
+scan attendance candidates, and write debug artifacts.
 
 ## Modes
 
@@ -114,6 +114,10 @@ npm run start
 C:\td3q-agent\artifacts\<run-id>\calibration-screenshot.png
 C:\td3q-agent\artifacts\<run-id>\calibration-overlay.png
 C:\td3q-agent\artifacts\<run-id>\calibration.json
+C:\td3q-agent\artifacts\<run-id>\canvas-selection-overlay.png
+C:\td3q-agent\artifacts\<run-id>\canvas-screen.png
+C:\td3q-agent\artifacts\<run-id>\canvas-client.png
+C:\td3q-agent\artifacts\<run-id>\canvas-window.png
 C:\td3q-agent\artifacts\<run-id>\top-menu-band.png
 C:\td3q-agent\artifacts\<run-id>\right-ui-band.png
 C:\td3q-agent\artifacts\<run-id>\full-game-band.png
@@ -134,10 +138,11 @@ C:\td3q-agent\artifacts\<run-id>\attendance-icon-roi.png
 C:\td3q-agent\artifacts\<run-id>\attendance-icon-match.png
 ```
 
-The overlay shows the game canvas, scan bands, candidate boxes, and the selected
-attendance match box. The runtime scans full top menu, right-side UI strip, and
-full-game coarse bands so right-edge UI is not skipped. If only the legacy
-`attendance_icon.png` template exists, the command returns
+The canvas artifacts compare the full screenshot, Windows client rect, and
+window rect. Phase 7.3 selects the full screen as `gameCanvasRect` by default so
+visible right-edge UI is not skipped when Windows `clientRect` is wrong. The
+runtime scans full top menu, right-side UI strip, and full-game coarse bands. If
+only the legacy `attendance_icon.png` template exists, the command returns
 `needs_template_confirmation` instead of a trusted match. Add
 `attendance_icon.windows.png` in `AGENT_TEMPLATE_DIR` after confirming the
 correct candidate crop from Windows artifacts.

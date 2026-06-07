@@ -18,6 +18,7 @@ export type TemplateMatchCandidate = {
     rank: number;
     score: number;
     box: PixelBox;
+    scale?: number;
 };
 
 export async function readPng(filePath: string): Promise<DecodedPng> {
@@ -40,6 +41,30 @@ function clampRoi(roi: PixelBox, image: DecodedPng): PixelBox {
 
 function pixelOffset(image: DecodedPng, x: number, y: number) {
     return (y * image.width + x) * 4;
+}
+
+function resizeNearest(image: DecodedPng, scale: number): DecodedPng {
+    if (scale === 1) return image;
+
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const data = Buffer.alloc(width * height * 4);
+
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const sourceX = Math.min(image.width - 1, Math.floor(x / scale));
+            const sourceY = Math.min(image.height - 1, Math.floor(y / scale));
+            const sourceOffset = pixelOffset(image, sourceX, sourceY);
+            const targetOffset = (y * width + x) * 4;
+
+            data[targetOffset] = image.data[sourceOffset];
+            data[targetOffset + 1] = image.data[sourceOffset + 1];
+            data[targetOffset + 2] = image.data[sourceOffset + 2];
+            data[targetOffset + 3] = image.data[sourceOffset + 3];
+        }
+    }
+
+    return { width, height, data };
 }
 
 function scoreAt(image: DecodedPng, template: DecodedPng, x: number, y: number) {
@@ -132,36 +157,44 @@ export function matchTemplateCandidates(
         minScore?: number;
         step?: number;
         overlapThreshold?: number;
+        scales?: number[];
     },
 ): TemplateMatchCandidate[] {
     const roi = clampRoi(options.roi, image);
     const step = options.step ?? 3;
     const minScore = options.minScore ?? 0;
     const overlapThreshold = options.overlapThreshold ?? 0.35;
-    const maxX = roi.x + roi.width - template.width;
-    const maxY = roi.y + roi.height - template.height;
+    const scales = options.scales ?? [1];
+    const rawCandidates: Array<{ score: number; box: PixelBox; scale: number }> = [];
 
-    if (maxX < roi.x || maxY < roi.y) return [];
+    for (const scale of scales) {
+        const scaledTemplate = resizeNearest(template, scale);
+        const maxX = roi.x + roi.width - scaledTemplate.width;
+        const maxY = roi.y + roi.height - scaledTemplate.height;
 
-    const rawCandidates: Array<{ score: number; box: PixelBox }> = [];
+        if (maxX < roi.x || maxY < roi.y) continue;
 
-    for (let y = roi.y; y <= maxY; y += step) {
-        for (let x = roi.x; x <= maxX; x += step) {
-            const score = scoreAt(image, template, x, y);
+        for (let y = roi.y; y <= maxY; y += step) {
+            for (let x = roi.x; x <= maxX; x += step) {
+                const score = scoreAt(image, scaledTemplate, x, y);
 
-            if (score >= minScore) {
-                rawCandidates.push({
-                    score,
-                    box: {
-                        x,
-                        y,
-                        width: template.width,
-                        height: template.height,
-                    },
-                });
+                if (score >= minScore) {
+                    rawCandidates.push({
+                        score,
+                        scale,
+                        box: {
+                            x,
+                            y,
+                            width: scaledTemplate.width,
+                            height: scaledTemplate.height,
+                        },
+                    });
+                }
             }
         }
     }
+
+    if (rawCandidates.length === 0) return [];
 
     rawCandidates.sort((a, b) => b.score - a.score);
 
@@ -181,6 +214,7 @@ export function matchTemplateCandidates(
         selected.push({
             rank: selected.length + 1,
             score: Number(candidate.score.toFixed(4)),
+            scale: candidate.scale,
             box: candidate.box,
         });
 
