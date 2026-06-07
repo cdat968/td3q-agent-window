@@ -25,6 +25,33 @@ function psString(value: string) {
     return `'${value.replace(/'/g, "''")}'`;
 }
 
+const DPI_AWARENESS_POWERSHELL = `
+try {
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class DpiAwarenessApi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int awareness);
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiFlag);
+}
+"@
+  $dpiOk = $false
+  try {
+    $dpiOk = [DpiAwarenessApi]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
+  } catch {}
+  if (-not $dpiOk) {
+    try {
+      $dpiResult = [DpiAwarenessApi]::SetProcessDpiAwareness(2)
+      $dpiOk = ($dpiResult -eq 0 -or $dpiResult -eq -2147024891)
+    } catch {}
+  }
+  if (-not $dpiOk) {
+    [DpiAwarenessApi]::SetProcessDPIAware() | Out-Null
+  }
+} catch {}
+`;
+
 function normalizeProcessName(name: string) {
     return name.replace(/\.exe$/i, "");
 }
@@ -69,6 +96,7 @@ export async function stabilizeGameWindow(config: RuntimeConfig): Promise<Window
     const processName = normalizeProcessName(config.gameProcessName);
     const script = `
 $ErrorActionPreference = 'Stop'
+${DPI_AWARENESS_POWERSHELL}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
 using System;

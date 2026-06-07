@@ -11,8 +11,44 @@ export type CaptureBounds = PixelBox;
 export type CaptureDpiResult = {
     dpiAwarenessAttempted: boolean;
     dpiAwarenessOk: boolean;
+    dpiAwarenessMethod?: string;
     dpiAwarenessError?: string;
 };
+
+const DPI_AWARENESS_POWERSHELL = `
+$dpiAttempted = $true
+$dpiOk = $false
+$dpiMethod = $null
+$dpiError = $null
+try {
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class DpiAwarenessApi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int awareness);
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiFlag);
+}
+"@
+  try {
+    $dpiOk = [DpiAwarenessApi]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
+    if ($dpiOk) { $dpiMethod = "per-monitor-v2" }
+  } catch {}
+  if (-not $dpiOk) {
+    try {
+      $dpiResult = [DpiAwarenessApi]::SetProcessDpiAwareness(2)
+      $dpiOk = ($dpiResult -eq 0 -or $dpiResult -eq -2147024891)
+      if ($dpiOk) { $dpiMethod = "per-monitor" }
+    } catch {}
+  }
+  if (-not $dpiOk) {
+    $dpiOk = [DpiAwarenessApi]::SetProcessDPIAware()
+    if ($dpiOk) { $dpiMethod = "system" }
+  }
+} catch {
+  $dpiError = $_.Exception.Message
+}
+`;
 
 function psString(value: string) {
     return `'${value.replace(/'/g, "''")}'`;
@@ -40,6 +76,7 @@ export async function capturePrimaryScreenPng(outputPath: string): Promise<strin
 
     const script = `
 $ErrorActionPreference = 'Stop'
+${DPI_AWARENESS_POWERSHELL}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -70,29 +107,9 @@ export async function captureScreenBoundsPng(
 
     const script = `
 $ErrorActionPreference = 'Stop'
+${DPI_AWARENESS_POWERSHELL}
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-$dpiAttempted = $true
-$dpiOk = $false
-$dpiError = $null
-try {
-  Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class DpiAwarenessApi {
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int awareness);
-}
-"@
-  try {
-    $dpiResult = [DpiAwarenessApi]::SetProcessDpiAwareness(2)
-    $dpiOk = ($dpiResult -eq 0 -or $dpiResult -eq -2147024891)
-  } catch {
-    $dpiOk = [DpiAwarenessApi]::SetProcessDPIAware()
-  }
-} catch {
-  $dpiError = $_.Exception.Message
-}
 $bounds = ${psBox(bounds)}
 $bitmap = New-Object System.Drawing.Bitmap ([int]$bounds.width), ([int]$bounds.height)
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -103,6 +120,7 @@ $bitmap.Dispose()
 @{
   dpiAwarenessAttempted = $dpiAttempted
   dpiAwarenessOk = $dpiOk
+  dpiAwarenessMethod = $dpiMethod
   dpiAwarenessError = $dpiError
 } | ConvertTo-Json -Compress
 `;
@@ -124,6 +142,7 @@ export async function getPrimaryAndVirtualScreenBounds(): Promise<{
 }> {
     const script = `
 $ErrorActionPreference = 'Stop'
+${DPI_AWARENESS_POWERSHELL}
 Add-Type -AssemblyName System.Windows.Forms
 function ToBox($bounds) {
   return @{
