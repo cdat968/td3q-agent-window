@@ -14,6 +14,12 @@ export type TemplateMatchResult = {
     box?: PixelBox;
 };
 
+export type TemplateMatchCandidate = {
+    rank: number;
+    score: number;
+    box: PixelBox;
+};
+
 export async function readPng(filePath: string): Promise<DecodedPng> {
     const raw = await readFile(filePath);
     const png = PNG.sync.read(raw);
@@ -102,4 +108,84 @@ export function matchTemplate(
         score: Number(Math.max(0, bestScore).toFixed(4)),
         box: bestBox,
     };
+}
+
+function intersectionOverUnion(a: PixelBox, b: PixelBox) {
+    const left = Math.max(a.x, b.x);
+    const top = Math.max(a.y, b.y);
+    const right = Math.min(a.x + a.width, b.x + b.width);
+    const bottom = Math.min(a.y + a.height, b.y + b.height);
+    const width = Math.max(0, right - left);
+    const height = Math.max(0, bottom - top);
+    const intersection = width * height;
+    const union = a.width * a.height + b.width * b.height - intersection;
+
+    return union === 0 ? 0 : intersection / union;
+}
+
+export function matchTemplateCandidates(
+    image: DecodedPng,
+    template: DecodedPng,
+    options: {
+        roi: PixelBox;
+        limit: number;
+        minScore?: number;
+        step?: number;
+        overlapThreshold?: number;
+    },
+): TemplateMatchCandidate[] {
+    const roi = clampRoi(options.roi, image);
+    const step = options.step ?? 3;
+    const minScore = options.minScore ?? 0;
+    const overlapThreshold = options.overlapThreshold ?? 0.35;
+    const maxX = roi.x + roi.width - template.width;
+    const maxY = roi.y + roi.height - template.height;
+
+    if (maxX < roi.x || maxY < roi.y) return [];
+
+    const rawCandidates: Array<{ score: number; box: PixelBox }> = [];
+
+    for (let y = roi.y; y <= maxY; y += step) {
+        for (let x = roi.x; x <= maxX; x += step) {
+            const score = scoreAt(image, template, x, y);
+
+            if (score >= minScore) {
+                rawCandidates.push({
+                    score,
+                    box: {
+                        x,
+                        y,
+                        width: template.width,
+                        height: template.height,
+                    },
+                });
+            }
+        }
+    }
+
+    rawCandidates.sort((a, b) => b.score - a.score);
+
+    const selected: TemplateMatchCandidate[] = [];
+
+    for (const candidate of rawCandidates) {
+        if (
+            selected.some(
+                (existing) =>
+                    intersectionOverUnion(existing.box, candidate.box) >
+                    overlapThreshold,
+            )
+        ) {
+            continue;
+        }
+
+        selected.push({
+            rank: selected.length + 1,
+            score: Number(candidate.score.toFixed(4)),
+            box: candidate.box,
+        });
+
+        if (selected.length >= options.limit) break;
+    }
+
+    return selected;
 }

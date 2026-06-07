@@ -39,6 +39,27 @@ export type TemplateAnchor = {
     roi?: PixelBox;
 };
 
+export type CalibrationStatus =
+    | "matched"
+    | "needs_template_confirmation"
+    | "candidate_only"
+    | "not_found";
+
+export type CalibrationScanBand = {
+    id: "top-menu-primary" | "top-menu-fallback";
+    box: PixelBox;
+    used: boolean;
+};
+
+export type CalibrationCandidate = {
+    rank: number;
+    score: number;
+    box: PixelBox;
+    templateFile: string;
+    scanBand: CalibrationScanBand["id"];
+    accepted: boolean;
+};
+
 export type ResolvedRois = Record<string, PixelBox>;
 
 export type CalibrationResult = {
@@ -46,12 +67,20 @@ export type CalibrationResult = {
     windowRect?: PixelBox;
     clientRect?: PixelBox;
     gameCanvasRect: PixelBox;
+    calibrationStatus?: CalibrationStatus;
+    scanBands?: CalibrationScanBand[];
+    candidates?: CalibrationCandidate[];
+    selectedAnchor?: CalibrationCandidate;
     anchors: TemplateAnchor[];
     resolvedRois: ResolvedRois;
     artifacts: {
         screenshotPath: string;
         overlayPath: string;
         jsonPath: string;
+        topMenuBandPath?: string;
+        topMenuFallbackBandPath?: string;
+        candidateSheetPath?: string;
+        candidatePaths?: string[];
         attendanceIconRoiPath?: string;
         attendanceIconMatchPath?: string;
     };

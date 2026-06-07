@@ -9,8 +9,8 @@ through the orchestrator.
 
 It does not yet click inside TD3Q. In Windows mode, `run.start` for
 `td3q.attendance` runs a calibration proof: focus/maximize the publisher game
-window, capture a screenshot, resolve Windows ROI, match the attendance icon
-anchor, and write debug artifacts.
+window, capture a screenshot, scan the top menu band for attendance candidates,
+and write debug artifacts.
 
 ## Modes
 
@@ -114,11 +114,23 @@ npm run start
 C:\td3q-agent\artifacts\<run-id>\calibration-screenshot.png
 C:\td3q-agent\artifacts\<run-id>\calibration-overlay.png
 C:\td3q-agent\artifacts\<run-id>\calibration.json
+C:\td3q-agent\artifacts\<run-id>\top-menu-band.png
+C:\td3q-agent\artifacts\<run-id>\top-menu-fallback-band.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-sheet.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-01.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-02.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-03.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-04.png
+C:\td3q-agent\artifacts\<run-id>\attendance-candidate-05.png
+C:\td3q-agent\artifacts\<run-id>\attendance-icon-roi.png
+C:\td3q-agent\artifacts\<run-id>\attendance-icon-match.png
 ```
 
-The overlay shows the game canvas, resolved ROI boxes, and attendance icon
-match box. If the icon is not found, the command fails but still returns the
-debug artifacts so the ROI can be inspected.
+The overlay shows the game canvas, scan bands, candidate boxes, and the selected
+attendance match box. If only the legacy `attendance_icon.png` template exists,
+the command returns `needs_template_confirmation` instead of a trusted match.
+Add `attendance_icon.windows.png` in `AGENT_TEMPLATE_DIR` after confirming the
+correct candidate crop from Windows artifacts.
 
 If `AGENT_BACKEND_HTTP_URL` is configured and the backend has Cloudinary
 credentials, the runtime uploads calibration artifacts through:
