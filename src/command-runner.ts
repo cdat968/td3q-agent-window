@@ -80,7 +80,10 @@ async function runStart(
                 });
             }
 
-            sendProgress(send, runId, 100, "capture diagnostic finished", {
+            sendProgress(send, runId, 100, "game ready probe finished", {
+                launchStatus: result.launch.launchStatus,
+                gameState: result.gameReady.gameState,
+                stateReason: result.gameReady.stateReason,
                 captureSource: result.captureSource,
                 gameContentRect: result.gameContent.gameContentRect,
                 gameContentResolver: result.gameContent.gameContentResolver,
@@ -88,9 +91,14 @@ async function runStart(
             send({
                 type: "run_event",
                 runId,
-                eventType: "capture_diagnostic_finished",
-                message: "Windows capture diagnostic completed",
+                eventType: "game_ready_probe_finished",
+                message: `Windows game ready probe completed: ${result.gameReady.gameState}`,
                 metadata: {
+                    launchStatus: result.launch.launchStatus,
+                    launch: result.launch,
+                    gameState: result.gameReady.gameState,
+                    stateReason: result.gameReady.stateReason,
+                    confidence: result.gameReady.confidence,
                     captureSource: result.captureSource,
                     captureCandidates: result.captureCandidates,
                     gameContentRect: result.gameContent.gameContentRect,
@@ -102,7 +110,7 @@ async function runStart(
             return {
                 ok: true,
                 runId,
-                message: "Windows capture diagnostic completed",
+                message: `Windows game ready probe completed: ${result.gameReady.gameState}`,
                 artifacts,
             };
         } catch (error) {
@@ -110,12 +118,12 @@ async function runStart(
             send({
                 type: "run_event",
                 runId,
-                eventType: "capture_diagnostic_failed",
+                eventType: "game_ready_probe_failed",
                 message,
                 metadata: {
                     scenarioId,
                     mode: config.mode,
-                    phase: "capture-diagnostic",
+                    phase: "game-ready-probe",
                 },
             });
 

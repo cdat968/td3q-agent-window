@@ -3,6 +3,8 @@ import path from "node:path";
 import type { RuntimeConfig } from "../config";
 import type { AgentArtifactDraft, AgentToServerMessage } from "../protocol";
 import { resolveWindowsGameContent, type GameContentResolution } from "./game-content-resolver";
+import { ensureGameLaunched, type GameLaunchResult } from "./game-launcher";
+import { probeWindowsGameReady, type GameReadyProbeResult } from "./game-ready-probe";
 import { renderOverlay } from "./overlay-renderer";
 import {
     captureScreenBoundsPng,
@@ -37,6 +39,8 @@ type CaptureDiagnosticResult = {
     selectedCapture: CaptureCandidate;
     captureCandidates: CaptureCandidate[];
     gameContent: GameContentResolution;
+    launch: GameLaunchResult;
+    gameReady: GameReadyProbeResult;
     stabilized: WindowStabilization;
     artifacts: AgentArtifactDraft[];
 };
@@ -59,7 +63,7 @@ function progress(
         message: `${percent}% ${message}`,
         metadata: {
             percent,
-            phase: "capture-diagnostic",
+            phase: "game-ready-probe",
             ...(metadata ?? {}),
         },
     });
@@ -144,13 +148,31 @@ export async function runWindowsCaptureDiagnostic(
     await mkdir(path.join(config.artifactDir, runId), { recursive: true });
 
     progress(send, runId, 10, "command accepted");
+    progress(send, runId, 12, "process checked", {
+        processName: config.gameProcessName,
+        launchPathConfigured: Boolean(config.gameLaunchPath),
+    });
+    const launch = await ensureGameLaunched(config);
+    progress(
+        send,
+        runId,
+        20,
+        launch.launchStatus === "already_running"
+            ? "game already running"
+            : "game launch attempted",
+        {
+            launchStatus: launch.launchStatus,
+            processName: launch.processName,
+            processId: launch.processId,
+            hwnd: launch.hwnd,
+            waitedMs: launch.waitedMs,
+        },
+    );
     const stabilized = await stabilizeGameWindow(config);
-    progress(send, runId, 20, "game process/window found", {
+    progress(send, runId, 30, "window ready/focused/maximized", {
         processName: stabilized.processName,
         processId: stabilized.processId,
         hwnd: stabilized.hwnd,
-    });
-    progress(send, runId, 30, "window maximized/focused", {
         windowRect: stabilized.windowRect,
         clientRect: stabilized.clientRect,
     });
@@ -234,6 +256,7 @@ export async function runWindowsCaptureDiagnostic(
     const selectedCapture =
         captureCandidates.find((candidate) => candidate.source === selected.source) ??
         selected;
+    const gameContentCropPath = artifactPath(config, runId, "game-content-crop.png");
     const gameContent = await resolveWindowsGameContent(
         {
             source: selected.source,
@@ -245,7 +268,7 @@ export async function runWindowsCaptureDiagnostic(
             windowRect: stabilized.windowRect,
         },
         {
-            cropPath: artifactPath(config, runId, "game-content-crop.png"),
+            cropPath: gameContentCropPath,
             overlayPath: artifactPath(config, runId, "game-content-overlay.png"),
             gutterDebugPath: artifactPath(config, runId, "game-content-gutter-debug.png"),
         },
@@ -268,10 +291,38 @@ export async function runWindowsCaptureDiagnostic(
         captureSource: selected.source,
         bounds: selected.bounds,
     });
+    progress(send, runId, 72, "game content resolved", {
+        gameContentRect: gameContent.gameContentRect,
+        gameContentResolver: gameContent.gameContentResolver,
+        excludedRects: gameContent.excludedRects,
+    });
+
+    const gameReady = await probeWindowsGameReady({
+        runId,
+        capturePath: selectedPath,
+        gameContentCropPath,
+        overlayPath: artifactPath(config, runId, "game-ready-probe-overlay.png"),
+        stateJsonPath: artifactPath(config, runId, "game-ready-state.json"),
+        gameContent,
+        launch,
+        stabilized,
+    });
+    progress(send, runId, 78, "game state classified", {
+        launchStatus: launch.launchStatus,
+        gameState: gameReady.gameState,
+        stateReason: gameReady.stateReason,
+        confidence: gameReady.confidence,
+    });
 
     const jsonPath = artifactPath(config, runId, "calibration.json");
     const body = {
         mode: "capture-diagnostic",
+        launchStatus: launch.launchStatus,
+        launch,
+        gameState: gameReady.gameState,
+        stateReason: gameReady.stateReason,
+        gameReadyProbe: gameReady.gameReadyProbe,
+        texture: gameReady.texture,
         captureSource: selected.source,
         selectedCapture,
         captureCandidates,
@@ -283,6 +334,13 @@ export async function runWindowsCaptureDiagnostic(
         screen: stabilized.screen,
         windowRect: stabilized.windowRect,
         clientRect: stabilized.clientRect,
+        processName: stabilized.processName,
+        processId: stabilized.processId,
+        hwnd: stabilized.hwnd,
+        readyPolicy: {
+            timeoutMs: config.gameReadyTimeoutMs,
+            retryMs: config.gameReadyRetryMs,
+        },
         generatedAt: new Date().toISOString(),
     };
     await writeFile(jsonPath, JSON.stringify(body, null, 2), "utf8");
@@ -300,6 +358,8 @@ export async function runWindowsCaptureDiagnostic(
                 captureSource: selected.source,
                 bounds: selected.bounds,
                 selected: true,
+                launchStatus: launch.launchStatus,
+                gameState: gameReady.gameState,
                 gameContentRect: gameContent.gameContentRect,
             },
         },
@@ -320,11 +380,14 @@ export async function runWindowsCaptureDiagnostic(
             metadata: {
                 source: "windows-capture-diagnostic",
                 role: "calibration-json",
+                launchStatus: launch.launchStatus,
+                gameState: gameReady.gameState,
                 captureSource: selected.source,
                 captureCandidates,
             },
         },
         ...gameContent.artifacts,
+        ...gameReady.artifacts,
     ];
 
     return {
@@ -333,6 +396,8 @@ export async function runWindowsCaptureDiagnostic(
         selectedCapture,
         captureCandidates,
         gameContent,
+        launch,
+        gameReady,
         stabilized,
         artifacts,
     };

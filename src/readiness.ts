@@ -136,6 +136,18 @@ async function checkGameProcess(config: RuntimeConfig): Promise<AgentReadinessCh
             message: config.gameProcessName,
         });
     } catch {
+        if (config.gameLaunchPath) {
+            const launchPathExists = await pathExists(config.gameLaunchPath);
+            return check({
+                key: "game_process",
+                label: "Game Process",
+                status: launchPathExists ? "warning" : "failed",
+                message: launchPathExists
+                    ? `Process not running; launchable: ${config.gameLaunchPath}`
+                    : `Process not found and GAME_LAUNCH_PATH does not exist: ${config.gameLaunchPath}`,
+            });
+        }
+
         return check({
             key: "game_process",
             label: "Game Process",

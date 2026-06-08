@@ -15,6 +15,10 @@ export type RuntimeConfig = {
     artifactDir: string;
     templateDir: string;
     gameProcessName?: string;
+    gameLaunchPath?: string;
+    gameLaunchTimeoutMs: number;
+    gameReadyTimeoutMs: number;
+    gameReadyRetryMs: number;
     windowStabilizeMode: "api-first";
     windowStabilizeTimeoutMs: number;
     heartbeatIntervalMs: number;
@@ -58,6 +62,10 @@ export function loadConfig(): RuntimeConfig {
         artifactDir: path.resolve(process.env.AGENT_ARTIFACT_DIR ?? `.runtime/agents/${agentId}/artifacts`),
         templateDir: path.resolve(process.env.AGENT_TEMPLATE_DIR ?? "templates"),
         gameProcessName: process.env.GAME_PROCESS_NAME || undefined,
+        gameLaunchPath: process.env.GAME_LAUNCH_PATH || undefined,
+        gameLaunchTimeoutMs: numberEnv("GAME_LAUNCH_TIMEOUT_MS", 60000),
+        gameReadyTimeoutMs: numberEnv("GAME_READY_TIMEOUT_MS", 90000),
+        gameReadyRetryMs: numberEnv("GAME_READY_RETRY_MS", 1500),
         windowStabilizeMode: "api-first",
         windowStabilizeTimeoutMs: numberEnv("WINDOW_STABILIZE_TIMEOUT_MS", 10000),
         heartbeatIntervalMs: numberEnv("HEARTBEAT_INTERVAL_MS", 5000),
